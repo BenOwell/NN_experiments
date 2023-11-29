@@ -1,0 +1,237 @@
+---
+title: "NeurElo"
+author: "Ben"
+format: html
+editor: visual
+---
+
+## Abstract
+
+We produce a time-varying neural net for modelling football matches
+
+# Initializing
+
+## Libraries
+
+```{r}
+library(dplyr)
+library(numDeriv)
+library(Matrix)
+```
+
+## Functions
+
+### Support functions
+
+```{r}
+cipher<-function(x,oldlabs,newlabs){
+x2<-rep(NA,length(x))
+class(x2)<-class(newlabs)
+for(i in 1:length(oldlabs)){
+ind<-which(x==oldlabs[i])
+x2[ind]<-newlabs[i]
+}
+x2
+}
+
+rownorm<-function(pmat){
+t(apply(pmat,1,function(x){x/sum(x)}))
+}
+rownorm2<-function(pmat){
+t(apply(pmat,1,function(x){x/sum(x^2)^.5}))
+}
+
+fcalc<-function(p,b){
+  if(any(is.na(c(p,b)))){f<-NA}else{
+  oo<-order(p*b,decreasing=T)
+  ooinv<-invperm(oo)
+  p<-p[oo];b<-b[oo]
+  q<-1/b
+  #D<-1/sum(q)
+  m<-length(p)
+  f<-rep(0,m)
+  R<-1
+  S<-c()
+  Sc<-1:m
+  k<-1
+  while(k<=m){
+   if((p[k]*b[k])>R){
+     S<-c(S,k);Sc<-setdiff(1:m,S)
+     R<-sum(p[Sc]) / (1-sum(q[S]))
+     k<-k+1
+     }else{k<-Inf}
+  }
+  
+  f<-p-q*R
+  f[Sc]<-0
+  f<-pospart(f)  
+  
+  f<-f[ooinv]
+  }
+  f
+}
+
+fcalc2<-function(pmat,bmat){
+n<-nrow(pmat)
+fmat<-matrix(0,n,3)
+for(i in 1:n){
+f<-fcalc(pmat[i,],bmat[i,])
+fmat[i,]<-f
+}
+fmat
+}
+
+invperm<-function(perm){
+  m<-length(perm)
+  (1:m)[order(perm)]
+}
+
+logwfun<-function(b,f,y){
+  log(1+sum(f*(y*b-1)))
+}
+logwfun2<-function(bmat,fmat,ymat){
+  logw<-c()
+  n<-nrow(bmat)
+  for(i in 1:n){logw[i]<-logwfun(bmat[i,],fmat[i,],ymat[i,])}
+  logw
+}
+
+logit<-function(p){log(p/(1-p))}
+logistic<-function(x){1/(1+exp(-x))}
+pospart<-function(x){max(0,x)}
+pospart<-Vectorize(pospart)
+
+kfun1<-function(r){pospart(1-r)^2}
+kfun2<-function(r){pospart(1-r)^3*(3*r+1)}
+curve(kfun1,from=0,to=1,n=256)
+curve(kfun2,from=0,to=1,n=256)
+```
+
+### NN functions
+
+```{r}
+synapse<-function(X,inv=F,d=0){
+if(inv==F & d==0){X<-.5*(X+log(1+exp(X)))}
+if(inv==T & d==0){X<--log(2)+log(-1+(1+4*exp(2*X))^.5)}
+if(inv==F & d==1){X<-(1+2*exp(X))/(2+2*exp(X))}
+if(inv==T & d==1){X<-1+(1+4*exp(2*X))-0.5}  
+X
+}
+
+synapse<-function(X,inv=F,d=0){
+negind<-which(X<0)
+posind<-setdiff(1:length(X),negind)
+if(inv==F & d==0){
+  X[negind]<-.5*X[negind]+0.5*log(1+exp(X[negind]))
+  X[posind]<-X[posind]+0.5*log(1+exp(-X[posind]))
+  }
+if(inv==T & d==0){
+  X[negind]<--log(2)+log(-1+(1+4*exp(2*X[negind]))^.5) ????
+  X[posind]<-X[posind]+log((4+exp(-2*X[posind]))^.5-exp(-X[posind]))-log(2)
+  }
+if(inv==F & d==1){
+  X[negind]<-(1+2*exp(X[negind]))/(2+2*exp(X[negind]))
+  X[posind]<-(exp(-X[posind])+2)/(2*exp(-X[posind])+2)
+  }
+#if(inv==T & d==1){X<-1+(1+4*exp(2*X))-0.5}  
+X
+}
+
+xvect<-seq(-1,1,length=128)*5
+plot(xvect,synapse(xvect),type="l");abline(a=0,b=1,col=3,lty=2,lwd=2)
+plot(xvect,synapse(xvect,inv=T),type="l");abline(a=0,b=1,col=3,lty=2,lwd=2)
+
+n<-128
+d<-6
+L<-2
+X<-matrix(rnorm(n*d),n,d)
+Y<-matrix(runif(n*d),n,d)
+Warray<-array(rnorm(d*d*L),dim=c(d,d,L))
+for(l in 1:L){
+W<-Warray[,,l]
+W[lower.tri(W)]<-0
+Warray[,,l]<-W
+}
+Warrayvect<-c(Warray)
+
+nn<-function(Warray,X){
+  for(l in 1:L){synapse(X%*%Warray[,,l])}
+  X
+}
+
+objfun<-function(Warray,X,Y){
+Warray<-array(Warray,dim=c(d,d,L))
+obj<-0
+for(l in 1:L){
+  W<-Warray[,,l]
+  #obj<-obj+n*sum(log(abs(diag(W))))
+  XW<-X%*%W
+  #obj<-obj+sum(log(synapse(XW,d=1)))
+  X<-synapse(XW)
+}
+obj<-obj+sum(Y*X-exp(X))
+obj
+}
+
+gradfun<-function(Warray,X,Y){
+  Warray<-array(Warray,dim=c(d,d,L))
+  dWarray<-array(0,dim=c(d,d,L))
+  for(l in 1:L){synapse(X%*%Warray[,,l])}
+  G<-Y-exp(X)
+  for(l in L:1){
+  X<-synapse(X,inv=T)
+  G<-G*synapse(X,inv=F,d=1)
+  W<-Warray[,,l]
+  X<-t(forwardsolve(t(W),t(X)))
+  dWarray[,,l]<-t(X)%*%G
+  G<-G%*%t(W)
+  }
+  dWarray
+}
+
+objfun(Warrayvect,X,Y)
+g<-grad(objfun,Warrayvect,X=X,Y=Y)
+array(g,dim=c(d,d,L))
+gradfun(Warrayvect,X=X,Y=Y)
+
+Warray<-Warrayvect
+```
+
+## Data
+
+```{r}
+E23 <- read.csv("~/Downloads/E0_2324.csv")
+E23$Date<-as.Date(E23$Date,"%d/%m/%Y")
+E22 <- read.csv("~/Downloads/E0_2223.csv")
+E22$Date<-as.Date(E22$Date,"%d/%m/%Y")
+E21 <- read.csv("~/Downloads/E0_2122.csv")
+E21$Date<-as.Date(E21$Date,"%d/%m/%Y")
+E20 <- read.csv("~/Downloads/E0_2021.csv")
+E20$Date<-as.Date(E20$Date,"%d/%m/%Y")
+E19 <- read.csv("~/Downloads/E0_1920.csv")
+E19$Date<-as.Date(E19$Date,"%d/%m/%Y")
+E18 <- read.csv("~/Downloads/E0_1819.csv")
+E18$Date<-as.Date(E18$Date,"%d/%m/%Y")
+E17 <- read.csv("~/Downloads/E0_1718.csv")
+E17$Date<-as.Date(E17$Date,"%d/%m/%Y")
+E16 <- read.csv("~/Downloads/E0_1617.csv")
+E16$Date<-as.Date(E16$Date,"%d/%m/%y")
+E15 <- read.csv("~/Downloads/E0_1516.csv")
+E15$Date<-as.Date(E15$Date,"%d/%m/%Y")
+E14 <- read.csv("~/Downloads/E0_1415.csv")
+E14$Date<-as.Date(E14$Date,"%d/%m/%y")
+E14<-E14[1:380,]
+E13 <- read.csv("~/Downloads/E0_1314.csv")
+E13$Date<-as.Date(E13$Date,"%d/%m/%y")
+E12 <- read.csv("~/Downloads/E0_1213.csv")
+E12$Date<-as.Date(E12$Date,"%d/%m/%y")
+E11 <- read.csv("~/Downloads/E0_1112.csv")
+E11$Date<-as.Date(E11$Date,"%d/%m/%y")
+E10 <- read.csv("~/Downloads/E0_1011.csv")
+E10$Date<-as.Date(E10$Date,"%d/%m/%y")
+E0<-bind_rows(E12,E13,E14,E15,E16,E17,E18,E19,E20,E21,E22,E23)
+Elist<-list(E12,E13,E14,E15,E16,E17,E18,E19,E20,E21,E22,E23)
+```
+
+
+
