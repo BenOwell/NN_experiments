@@ -7,7 +7,7 @@ editor: visual
 
 ## Abstract
 
-We produce a time-varying neural net for modelling football matches
+We produce a time-varying neural net for modelling football matches...
 
 # Initializing
 
@@ -126,7 +126,7 @@ if(inv==F & d==0){
   X[posind]<-X[posind]+0.5*log(1+exp(-X[posind]))
   }
 if(inv==T & d==0){
-  X[negind]<--log(2)+log(-1+(1+4*exp(2*X[negind]))^.5) ????
+  X[negind]<-2*X[negind]+log(2-4*exp(2*X[negind])/((4*exp(2*X[negind])+1)^0.5+2*exp(2*X[negind])+1))-log(2)
   X[posind]<-X[posind]+log((4+exp(-2*X[posind]))^.5-exp(-X[posind]))-log(2)
   }
 if(inv==F & d==1){
@@ -138,8 +138,10 @@ X
 }
 
 xvect<-seq(-1,1,length=128)*5
-plot(xvect,synapse(xvect),type="l");abline(a=0,b=1,col=3,lty=2,lwd=2)
-plot(xvect,synapse(xvect,inv=T),type="l");abline(a=0,b=1,col=3,lty=2,lwd=2)
+plot(xvect,synapse(xvect),type="l",asp=1);points(xvect,synapse(xvect,inv=T),type="l",col=2);abline(a=0,b=1,col=3,lty=2,lwd=2)
+eps<-1e-5
+plot(xvect,(synapse(xvect+eps)-synapse(xvect))/eps,type="l");points(xvect,synapse(xvect,d=1),type="l",col=2,lty=2,lwd=3)
+#xvect-synapse(synapse(xvect),inv=T)
 
 n<-128
 d<-6
@@ -176,7 +178,7 @@ obj
 gradfun<-function(Warray,X,Y){
   Warray<-array(Warray,dim=c(d,d,L))
   dWarray<-array(0,dim=c(d,d,L))
-  for(l in 1:L){synapse(X%*%Warray[,,l])}
+  for(l in 1:L){X<-synapse(X%*%Warray[,,l])}
   G<-Y-exp(X)
   for(l in L:1){
   X<-synapse(X,inv=T)
@@ -194,7 +196,6 @@ g<-grad(objfun,Warrayvect,X=X,Y=Y)
 array(g,dim=c(d,d,L))
 gradfun(Warrayvect,X=X,Y=Y)
 
-Warray<-Warrayvect
 ```
 
 ## Data
@@ -232,6 +233,3 @@ E10$Date<-as.Date(E10$Date,"%d/%m/%y")
 E0<-bind_rows(E12,E13,E14,E15,E16,E17,E18,E19,E20,E21,E22,E23)
 Elist<-list(E12,E13,E14,E15,E16,E17,E18,E19,E20,E21,E22,E23)
 ```
-
-
-
